@@ -1,0 +1,94 @@
+def fail_commit(commit, message)
+  fail("#{commit.sha}: #{message}")
+end
+
+def lines_changed_in_commit(commit)
+  commit.diff_parent.stats[:total][:lines]
+end
+
+def subject_starts_with_emoji?(subject)
+    subject =~ /\A:[\+a-z0-9_\-]+: /
+end
+
+def subject_starts_with_capital?(subject)
+  first_char = subject.sub(/\A:[\+a-z0-9_\-]+: /, '').chars.first
+
+  first_char.upcase == first_char
+end
+
+def lint_commits(commits)
+  commits.each do |commit|
+    # For now we'll ignore merge commits, as getting rid of those is a problem
+    # separate from enforcing good commit messages.
+    next if commit.message.start_with?('Merge branch')
+
+    subject, separator, details = commit.message.split("\n", 3)
+
+    if subject.split.length < 3
+      fail_commit(
+        commit,
+        'The commit subject must contain at least three words'
+      )
+    end
+
+    if subject.length > 50
+      fail_commit(
+        commit,
+        'The commit subject may not be longer than 50 characters'
+      )
+    end
+
+    unless subject_starts_with_emoji?(subject)
+      fail_commit(commit, 'The commit subject must start with a emoji + a single space')
+    end
+
+    unless subject_starts_with_capital?(subject)
+      fail_commit(commit, 'The commit message must start with a capital character')
+    end
+
+    unless subject.end_with?('.')
+      fail_commit(commit, 'The commit subject must end with a period')
+    end
+
+    if separator && !separator.empty?
+      fail_commit(
+        commit,
+        'The commit subject and body must be separated by a blank line'
+      )
+    end
+
+    details&.each_line do |line|
+      line = line.strip
+
+      next if line.length <= 72
+
+      url_size = line.scan(%r((https?://\S+))).sum { |(url)| url.length }
+
+      # If the line includes a URL, we'll allow it to exceed 72 characters, but
+      # only if the line _without_ the URL does not exceed this limit.
+      next if line.length - url_size <= 72
+
+      fail_commit(
+        commit,
+        'The commit body should not contain more than 72 characters per line'
+      )
+    end
+
+    if !details && lines_changed_in_commit(commit) >= 20
+      fail_commit(
+        commit,
+        'Commits that change more than 20 lines ' \
+          'must describe these changes in the commit body'
+      )
+    end
+  end
+end
+
+if git.commits.length > 10 && !ce_upstream?
+  warn(
+    'This merge request includes more than 10 commits. ' \
+      'Please rebase these commits into a smaller number of commits.'
+  )
+else
+  lint_commits(git.commits)
+end
