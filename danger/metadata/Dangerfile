@@ -1,2 +1,2 @@
 warn("Big PR") if git.lines_of_code > 500
-
+fail("Please add labels to this PR") if github.pr_labels.empty?
